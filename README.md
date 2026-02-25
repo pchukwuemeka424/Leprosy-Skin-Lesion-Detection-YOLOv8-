@@ -338,6 +338,25 @@ Requires trained weights at `runs/detect/leprosy/weights/best.pt` (run `scripts/
 
 **Quick train + evaluate:** `./run_train_eval.sh` (trains then runs evaluation). See `CHECKLIST.md` for a pipeline checklist and quick verify commands.
 
+---
+
+## Deployment
+
+**Vercel is not suitable** for this app: it’s a Streamlit + PyTorch/YOLO app that needs a long-running Python process and large dependencies (model weights, Ultralytics). Vercel’s serverless limits (e.g. 50 MB function size) and request/response model don’t support this.
+
+**Recommended: Streamlit Community Cloud** (free, one-click from GitHub)
+
+1. Push this repo to GitHub (you already have `origin` set).
+2. Go to [share.streamlit.io](https://share.streamlit.io), sign in with GitHub.
+3. Click **“New app”** → choose this repo, branch `main`, main file **`app.py`**.
+4. Click **Deploy**. Streamlit Cloud will install `requirements.txt` and run `streamlit run app.py`.
+5. Ensure **trained weights** are in the repo at `runs/detect/leprosy/weights/best.pt` (commit and push them if you train locally), or the app will show “Model not found”.
+
+**Other options**
+
+- **[Hugging Face Spaces](https://huggingface.co/spaces)** (Streamlit): create a Space, select Streamlit SDK, upload `app.py` and `requirements.txt`, and add `best.pt` (e.g. via Git LFS or “Files and versions”).
+- **Railway / Render**: deploy as a web service with `streamlit run app.py --server.port=$PORT`; add a `Procfile` or start command and include the weights in the repo or as build artifacts.
+
 ## File overview
 
 | Script | Purpose |
