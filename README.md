@@ -2,6 +2,84 @@
 
 Early detection of leprosy skin lesions using YOLOv8 with auto-generated pseudo-labels, transfer learning, and data augmentation.
 
+**Product summary:** Raw skin images are split into train/val, pseudo-labeled (SAM or OpenCV), then used to fine-tune YOLOv8n. The trained model powers a Streamlit healthcare dashboard where users upload an image and receive **Leprosy** / **Not Leprosy** with confidence and optional detection overlay. Pipeline scripts: prepare → annotate → train → evaluate → inference; optional batch inference and annotated previews.
+
+---
+
+## System architecture
+
+The system has four main layers:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  PRESENTATION LAYER                                                         │
+│  • Streamlit app (app.py): upload image → prediction + confidence + overlay │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  MODEL LAYER                                                                │
+│  • YOLOv8n (Ultralytics): object detection, single class "lesion"            │
+│  • Weights: runs/detect/leprosy/weights/best.pt (after training)              │
+│  • Inference: conf threshold 0.15; dashboard uses ≥0.25 for "Leprosy" label   │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  PIPELINE LAYER (scripts/)                                                  │
+│  • 0_prepare_dataset.py  → train/val split (80/20)                          │
+│  • 1_auto_annotate.py    → pseudo-labels (SAM or OpenCV) → YOLO .txt         │
+│  • 2_train.py            → train YOLOv8n on data.yaml                      │
+│  • 3_evaluate.py         → mAP, precision, recall on val set               │
+│  • 4_inference.py        → batch predict, save images with boxes           │
+│  • 5_show_annotated.py   → draw labels on images → dataset/annotated/       │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  DATA LAYER                                                                 │
+│  • Source: leprosy-images/ (or custom path)                                 │
+│  • dataset/images/{train,val}/  → images                                     │
+│  • dataset/labels/{train,val}/  → YOLO format (class_id xc yc w h normalized)│
+│  • dataset/data.yaml          → paths + nc:1, names: {0: lesion}            │
+│  • dataset/annotated/         → visual verification (from script 5)         │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Dependencies:** Python 3.10–3.12, Ultralytics (YOLOv8), OpenCV, Streamlit; optional: Segment Anything (SAM) for better pseudo-labels.
+
+---
+
+## System flow
+
+**End-to-end (training pipeline):**
+
+```
+Raw skin images (e.g. leprosy-images/)
+        │
+        ▼  [0] 0_prepare_dataset.py  (80/20 split by deterministic hash)
+dataset/images/train/   dataset/images/val/
+        │
+        ▼  [1] 1_auto_annotate.py    (SAM or OpenCV → bounding boxes)
+dataset/labels/train/   dataset/labels/val/   (.txt per image: class_id xc yc w h)
+        │
+        ▼  [2] 2_train.py            (YOLOv8n + data.yaml → train with augmentation)
+runs/detect/leprosy/weights/best.pt   last.pt
+        │
+        ├──► [3] 3_evaluate.py       (val set → mAP50, mAP50-95, precision, recall)
+        │
+        └──► [4] 4_inference.py  or  app.py   (predict on images / upload)
+```
+
+**Inference flow (dashboard):**
+
+```
+User uploads image → temp file → YOLO.predict(conf=0.15)
+        → boxes + confidence
+        → max confidence ≥ 0.25 ? "Leprosy" : "Not Leprosy"
+        → display: prediction badge, confidence %, progress bar, detection overlay (if boxes)
+```
+
 ---
 
 ## Process overview
@@ -47,6 +125,105 @@ Dashboard / Inference ← [4] Inference (optional) ← [3] Evaluate (mAP, P, R) 
 
 ---
 
+## Data and training process
+
+Detailed flow from raw images to a trained model and screening.
+
+### Step 0: Data preparation
+
+| Item | Detail |
+|------|--------|
+| **Input** | Source folder of skin images (default: `leprosy-images/`). |
+| **Formats** | `.jpg`, `.jpeg`, `.png`, `.webp`, `.gif`, `.bmp`. |
+| **Split** | 80% train / 20% val, deterministic (MD5 hash of filename + seed 42). |
+| **Output** | `dataset/images/train/`, `dataset/images/val/` (copies; originals unchanged). |
+| **This repo** | 39 train, 10 val (49 total images). |
+
+### Step 1: Pseudo-labeling (annotations)
+
+| Item | Detail |
+|------|--------|
+| **Input** | Images in `dataset/images/train/` and `dataset/images/val/`. |
+| **Methods** | **SAM** (recommended): Segment Anything Model → masks → bounding boxes. **OpenCV fallback**: grayscale + Otsu threshold + contours → boxes. |
+| **Filters** | Box area 0.5%–85% of image; min side 15 px; SAM: `points_per_side=12`, `pred_iou_thresh=0.7`, `stability_score_thresh=0.85`. |
+| **Output** | One `.txt` per image in `dataset/labels/{train,val}/`. Format: `0 x_center y_center width height` (normalized 0–1). Class `0` = lesion. |
+| **Fallback** | If no boxes found, one conservative box `(0.5, 0.5, 0.4, 0.4)` is written so training has a label. |
+
+### Step 2: Training
+
+| Item | Detail |
+|------|--------|
+| **Config** | `dataset/data.yaml`: `path`, `train`, `val`, `nc: 1`, `names: {0: lesion}`. |
+| **Model** | YOLOv8n pretrained (`yolov8n.pt`), transfer learning. |
+| **Input size** | 640×640 (letterboxing). Batch size 8. |
+| **Optimizer** | AdamW, `lr0=1e-3`, `lrf=0.01`, weight decay `0.0005`, warmup 3 epochs. |
+| **Augmentation** | Mosaic 1.0, mixup 0.1, HSV, fliplr 0.5, degrees 15, translate 0.1, scale 0.5, shear 5. |
+| **Stopping** | Early stopping `patience=30`; max epochs 150 (override: env `EPOCHS`). |
+| **Training set size (this repo)** | 39 images (train); 10 images (val). |
+| **Output** | `runs/detect/leprosy/weights/best.pt`, `last.pt`; curves and logs in `runs/detect/leprosy/`. |
+
+### Step 3: Evaluation
+
+| Item | Detail |
+|------|--------|
+| **Input** | `best.pt` (or path as CLI arg), `dataset/data.yaml` (val split). |
+| **Metrics** | mAP50, mAP50-95, Precision (box.mp), Recall (box.mr). |
+| **Script** | `scripts/3_evaluate.py` [optional weights path]. |
+
+### Step 4: Inference and dashboard
+
+| Item | Detail |
+|------|--------|
+| **Batch** | `4_inference.py`: predict on folder (default: `dataset/images/`), save images with boxes to `runs/detect/leprosy/predict/`. |
+| **Dashboard** | `app.py`: upload single image → YOLO predict (conf=0.15) → max conf ≥ 0.25 → "Leprosy" else "Not Leprosy"; show confidence and detection overlay. |
+
+---
+
+## Project structure
+
+```
+project_01/
+├── app.py                    # Streamlit dashboard (upload → Leprosy / Not Leprosy)
+├── requirements.txt          # ultralytics, opencv-python, streamlit, etc.
+├── run_train_eval.sh         # Train + evaluate in one go
+├── yolov8n.pt                # Pretrained YOLOv8 nano (downloaded by Ultralytics if missing)
+├── dataset/
+│   ├── data.yaml             # Dataset config (paths, nc, class names)
+│   ├── images/{train,val}/   # Images
+│   ├── labels/{train,val}/   # YOLO labels (.txt per image)
+│   └── annotated/{train,val}/ # Visual verification (from 5_show_annotated.py)
+├── leprosy-images/           # Default source for step 0 (optional)
+├── checkpoints/              # SAM checkpoint (e.g. sam_vit_b_01ec64.pth) if using SAM
+├── runs/detect/leprosy/
+│   ├── weights/best.pt       # Best weights (used by app and 4_inference)
+│   ├── weights/last.pt
+│   └── predict/              # Output of 4_inference.py
+└── scripts/
+    ├── 0_prepare_dataset.py  # Train/val split
+    ├── 1_auto_annotate.py    # Pseudo-labels (SAM or OpenCV)
+    ├── 2_train.py           # Train YOLOv8
+    ├── 3_evaluate.py        # mAP, P, R
+    ├── 4_inference.py       # Batch predict, save images
+    └── 5_show_annotated.py   # Draw labels → dataset/annotated/
+```
+
+---
+
+## Key configuration
+
+| Item | Value | Where |
+|------|--------|--------|
+| **Number of images (this repo)** | **39 train, 10 val (49 total)** | `dataset/images/train/`, `dataset/images/val/` |
+| Train/val split | 80% / 20% | `0_prepare_dataset.py` (`TRAIN_RATIO`, `RANDOM_SEED`) |
+| Pseudo-label area | 0.5%–85% of image | `1_auto_annotate.py` (`MIN_AREA_RATIO`, `MAX_AREA_RATIO`) |
+| Min box side | 15 px | `1_auto_annotate.py` (`MIN_SIDE_PX`) |
+| Detection threshold (dashboard) | ≥ 25% → "Leprosy" | `app.py` (`CONF_THRESHOLD`) |
+| Inference confidence (model) | 0.15 | `app.py` (`model.predict(conf=0.15)`); lower = more detections |
+| Epochs / early stopping | 150 / patience 30 | `2_train.py` (env `EPOCHS` to override) |
+| Image size | 640×640 | `2_train.py` (`imgsz=640`) |
+
+---
+
 ## Setup
 
 Use **Python 3.10, 3.11, or 3.12** (PyTorch/Ultralytics do not support Python 3.14 yet).
@@ -56,7 +233,8 @@ cd /Users/acehub/Desktop/project_01
 python -m venv venv
 source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-# Or: pip install ultralytics opencv-python
+# Or: pip install ultralytics opencv-python streamlit
+# Optional: pip install segment-anything for better pseudo-labels (Step 1)
 ```
 
 ## Dataset layout
@@ -64,6 +242,7 @@ pip install -r requirements.txt
 - **Images**: `dataset/images/train/`, `dataset/images/val/`
 - **Labels (YOLO)**: `dataset/labels/train/`, `dataset/labels/val/`
 - **Config**: `dataset/data.yaml`
+- **Number of images used to train (this repo):** **39** training images, **10** validation images (**49** total).
 
 ---
 
@@ -156,6 +335,8 @@ streamlit run app.py
 ```
 
 Requires trained weights at `runs/detect/leprosy/weights/best.pt` (run `scripts/2_train.py` first).
+
+**Quick train + evaluate:** `./run_train_eval.sh` (trains then runs evaluation). See `CHECKLIST.md` for a pipeline checklist and quick verify commands.
 
 ## File overview
 
