@@ -2,6 +2,51 @@
 
 Early detection of leprosy skin lesions using YOLOv8 with auto-generated pseudo-labels, transfer learning, and data augmentation.
 
+---
+
+## Process overview
+
+End-to-end flow from raw images to screening:
+
+```
+Raw skin images → [0] Prepare dataset → [1] Pseudo-labels (SAM/OpenCV) → [2] Train YOLOv8
+                                                                              ↓
+Dashboard / Inference ← [4] Inference (optional) ← [3] Evaluate (mAP, P, R) ←┘
+```
+
+| Step | Script | What it does |
+|------|--------|--------------|
+| **0** | `0_prepare_dataset.py` | Split source images into `dataset/images/train` and `dataset/images/val` (80/20). |
+| **1** | `1_auto_annotate.py` | Generate YOLO-format labels (pseudo-labels) via SAM or OpenCV fallback. |
+| **2** | `2_train.py` | Train YOLOv8n on `dataset/data.yaml`; save best/last weights. |
+| **3** | `3_evaluate.py` | Compute validation mAP, precision, recall. |
+| **4** | `4_inference.py` | Run model on images and save predictions with bounding boxes. |
+| — | `app.py` | Streamlit dashboard: upload image → Leprosy / Not Leprosy + confidence. |
+
+---
+
+## Architecture
+
+- **Model**: [YOLOv8](https://docs.ultralytics.com/) (Ultralytics), **nano** variant (`yolov8n.pt`) for object detection.
+- **Task**: Single-class detection — one class `lesion` (leprosy skin lesion).
+- **Input**: RGB images; training/inference at **640×640** (with letterboxing).
+- **Output**: Bounding boxes (xywh) + confidence per detection; dashboard uses **≥25% confidence** as “Leprosy” threshold.
+
+**Training setup:**
+
+| Component | Choice |
+|-----------|--------|
+| Pretrained backbone | YOLOv8n (transfer learning) |
+| Optimizer | AdamW |
+| Learning rate | `lr0=1e-3`, `lrf=0.01`, warmup 3 epochs |
+| Regularization | Weight decay `0.0005`, momentum `0.937` |
+| Epochs | 150 (env `EPOCHS`); early stopping **patience=30** |
+| Augmentation | Mosaic, mixup, HSV, fliplr, scale, translate, shear, degrees |
+
+**Dataset config** (`dataset/data.yaml`): paths to `images/train`, `images/val`; `nc: 1`, class name `lesion`.
+
+---
+
 ## Setup
 
 Use **Python 3.10, 3.11, or 3.12** (PyTorch/Ultralytics do not support Python 3.14 yet).
@@ -20,7 +65,11 @@ pip install -r requirements.txt
 - **Labels (YOLO)**: `dataset/labels/train/`, `dataset/labels/val/`
 - **Config**: `dataset/data.yaml`
 
-## Pipeline (run in order)
+---
+
+## Pipeline steps (run in order)
+
+Follow these steps after setup. Step numbers match the process overview above.
 
 ### 0. Prepare dataset
 
