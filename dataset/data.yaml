@@ -1,0 +1,11 @@
+# Leprosy skin lesion detection - YOLOv8
+# Run training from project root (path is relative to cwd)
+path: dataset
+train: images/train
+val: images/val
+
+# Classes (single class: lesion)
+names:
+  0: lesion
+
+nc: 1

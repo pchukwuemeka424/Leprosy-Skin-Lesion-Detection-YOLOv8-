@@ -1,0 +1,11 @@
+# Leprosy lesion detection - YOLOv8 pipeline
+ultralytics>=8.0.0
+opencv-python>=4.8.0
+numpy>=1.24.0
+PyYAML>=6.0
+streamlit>=1.28.0
+
+# Optional: for auto-annotation with SAM (better pseudo-labels)
+# segment-anything  # install separately: pip install git+https://github.com/facebookresearch/segment-anything.git
+# torch>=1.13.0
+# torchvision

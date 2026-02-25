@@ -1,0 +1,16 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# OS
+.DS_Store
+
+# Optional: uncomment to avoid committing large artifacts
+# runs/
+# yolov8n.pt
+# dataset/images/
+# dataset/labels/
