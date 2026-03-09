@@ -5,9 +5,12 @@ Modern healthcare-themed UI with metric-focused layout.
 import streamlit as st
 from pathlib import Path
 import tempfile
+import urllib.request
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 WEIGHTS_PATH = PROJECT_ROOT / "runs" / "detect" / "leprosy" / "weights" / "best.pt"
+# Fallback: download from repo when missing (e.g. Streamlit Cloud deploy without weights in clone)
+WEIGHTS_RAW_URL = "https://github.com/pchukwuemeka424/Leprosy-Skin-Lesion-Detection-YOLOv8-/raw/main/runs/detect/leprosy/weights/best.pt"
 CONF_THRESHOLD = 0.25  # minimum confidence to count as "Leprosy"
 
 # ─── Dashboard theme: midnight blue + red, white text on backgrounds ─────────
@@ -221,15 +224,32 @@ HEALTHCARE_CSS = """
 _load_model_error_hint = None
 
 
+def _get_weights_path():
+    """Return path to best.pt: use repo path if present, else download to temp from GitHub raw."""
+    if WEIGHTS_PATH.exists():
+        return str(WEIGHTS_PATH)
+    cache_dir = Path(tempfile.gettempdir()) / "leprosy_yolo_weights"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cached = cache_dir / "best.pt"
+    if cached.exists():
+        return str(cached)
+    try:
+        urllib.request.urlretrieve(WEIGHTS_RAW_URL, cached)
+        return str(cached)
+    except Exception:
+        return None
+
+
 @st.cache_resource
 def load_model():
     global _load_model_error_hint
     _load_model_error_hint = None
-    if not WEIGHTS_PATH.exists():
+    weights_path = _get_weights_path()
+    if weights_path is None:
         return None
     try:
         from ultralytics import YOLO
-        return YOLO(str(WEIGHTS_PATH))
+        return YOLO(weights_path)
     except Exception:
         # e.g. ImportError (cv2/ultralytics) on Python 3.13 or headless env
         _load_model_error_hint = (
