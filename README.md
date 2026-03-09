@@ -349,8 +349,9 @@ Requires trained weights at `runs/detect/leprosy/weights/best.pt` (run `scripts/
 1. Push this repo to GitHub (you already have `origin` set).
 2. Go to [share.streamlit.io](https://share.streamlit.io), sign in with GitHub.
 3. Click **“New app”** → choose this repo, branch `main`, main file **`app.py`**.
-4. Click **Deploy**. Streamlit Cloud will install `requirements.txt` and run `streamlit run app.py`.
-5. Ensure **trained weights** are in the repo at `runs/detect/leprosy/weights/best.pt` (commit and push them if you train locally), or the app will show “Model not found”.
+4. Open **Advanced settings** and set **Python version** to **3.11** or **3.12**. (Python 3.13 is not fully supported by Ultralytics/OpenCV and can cause import errors.)
+5. Click **Deploy**. Streamlit Cloud will install `requirements.txt` and run `streamlit run app.py`.
+6. Ensure **trained weights** are in the repo at `runs/detect/leprosy/weights/best.pt` (commit and push them if you train locally), or the app will show “Model not found”.
 
 **Other options**
 

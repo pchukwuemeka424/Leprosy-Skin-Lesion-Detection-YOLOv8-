@@ -217,12 +217,26 @@ HEALTHCARE_CSS = """
 """
 
 
+# Set by load_model() on import/runtime failure (e.g. Python 3.13 or missing cv2)
+_load_model_error_hint = None
+
+
 @st.cache_resource
 def load_model():
+    global _load_model_error_hint
+    _load_model_error_hint = None
     if not WEIGHTS_PATH.exists():
         return None
-    from ultralytics import YOLO
-    return YOLO(str(WEIGHTS_PATH))
+    try:
+        from ultralytics import YOLO
+        return YOLO(str(WEIGHTS_PATH))
+    except Exception:
+        # e.g. ImportError (cv2/ultralytics) on Python 3.13 or headless env
+        _load_model_error_hint = (
+            "Model runtime could not be loaded (often due to Python or OpenCV). "
+            "On **Streamlit Community Cloud**, use **Python 3.11 or 3.12** in Advanced settings when deploying."
+        )
+        return None
 
 
 def predict(image_path: str):
@@ -260,7 +274,9 @@ def main():
         if load_model() is not None:
             st.success("Model loaded")
         else:
-            st.error("Model not found")
+            st.error("Model not found" if _load_model_error_hint is None else "Model runtime unavailable")
+            if _load_model_error_hint:
+                st.markdown(_load_model_error_hint)
 
     # ─── Main: header ───────────────────────────────────────────────────────
     st.markdown(
@@ -272,7 +288,11 @@ def main():
     )
 
     if load_model() is None:
-        st.error(f"Trained weights not found at `{WEIGHTS_PATH}`. Run training first: `python3 scripts/2_train.py`")
+        if _load_model_error_hint:
+            st.error("Model runtime could not be loaded")
+            st.info(_load_model_error_hint)
+        else:
+            st.error(f"Trained weights not found at `{WEIGHTS_PATH}`. Run training first: `python3 scripts/2_train.py`")
         return
 
     # ─── Upload ─────────────────────────────────────────────────────────────
